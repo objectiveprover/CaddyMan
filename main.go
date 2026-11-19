@@ -28,7 +28,7 @@ Usage:
   caddyman list                  list the sites
   caddyman apply                 copy the sites into Caddy's directory and reload Caddy
                                  (with sudo; also after editing the config by hand)
-  caddyman check                 check that Caddy runs and imports CaddyMan's sites
+  caddyman check                 check that Caddy has everything it needs to run
   caddyman hosts                 print /etc/hosts lines for the sites
   caddyman paths                 show where the files are
   caddyman config version        show the config's version and the current one
