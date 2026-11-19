@@ -129,3 +129,35 @@ func parseShow(out string) []State {
 	}
 	return res
 }
+
+// Binary is the program a unit runs (ExecStart='s path; "" when systemd
+// doesn't know the unit or it has no ExecStart=).
+func Binary(u Unit) string {
+	args := []string{"show", "--property=ExecStart", "--value", "--", u.Name}
+	if u.Scope == "user" {
+		args = append([]string{"--user"}, args...)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	b, err := exec.CommandContext(ctx, "systemctl", args...).Output()
+	if err != nil {
+		return ""
+	}
+	return execPath(string(b))
+}
+
+// execPath reads the path out of `systemctl show -p ExecStart --value`:
+// "{ path=/usr/bin/app ; argv[]=/usr/bin/app serve ; … }".
+func execPath(show string) string {
+	_, rest, ok := strings.Cut(show, "path=")
+	if !ok {
+		return ""
+	}
+	if i := strings.IndexAny(rest, " ;\n"); i >= 0 {
+		rest = rest[:i]
+	}
+	if !strings.HasPrefix(rest, "/") {
+		return ""
+	}
+	return rest
+}

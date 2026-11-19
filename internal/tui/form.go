@@ -57,6 +57,11 @@ type form struct {
 	err    string
 	title  string // view name in the top bar
 	orig   string // address of the site being edited; "" for a new one
+
+	// initial holds the fields' values when the form opened, auto the ones
+	// last filled in for a picked service: a field still holding either
+	// may be filled in again, one changed by hand is kept.
+	initial, auto map[string]string
 }
 
 // noService is the Service field's first choice.
@@ -128,7 +133,30 @@ func (m *Model) openForm(s *config.Site) tea.Cmd {
 	}
 	m.form, m.mode = f, modeForm
 	f.setFocus(0)
+	f.initial, f.auto = map[string]string{}, map[string]string{}
+	for _, fl := range f.fields {
+		f.initial[fl.id] = fl.value()
+	}
 	return nil
+}
+
+// replaceable reports whether field id may be filled in for a picked
+// service: it's as the form opened or as last filled in.
+func (f *form) replaceable(id string) bool {
+	v := f.val(id)
+	a, filled := f.auto[id]
+	return v == f.initial[id] || (filled && v == a)
+}
+
+// fill sets field id for a picked service, remembering the value.
+func (f *form) fill(id, v string) {
+	fl := f.get(id)
+	if fl.choices != nil {
+		fl.setChoice(v)
+	} else {
+		fl.ti.SetValue(v)
+	}
+	f.auto[id] = fl.value()
 }
 
 func (f *form) get(id string) *field {
@@ -221,7 +249,7 @@ func (f *form) key(m *Model, msg tea.KeyMsg) tea.Cmd {
 	case "enter":
 		if cur.choices != nil {
 			cur.choice = (cur.choice + 1) % len(cur.choices)
-			f.choiceChanged(m, cur)
+			return f.choiceChanged(m, cur)
 		} else {
 			f.move(1)
 		}
@@ -236,27 +264,32 @@ func (f *form) key(m *Model, msg tea.KeyMsg) tea.Cmd {
 		default:
 			return nil
 		}
-		f.choiceChanged(m, cur)
-		return nil
+		return f.choiceChanged(m, cur)
 	}
 	var cmd tea.Cmd
 	cur.ti, cmd = cur.ti.Update(msg)
 	return cmd
 }
 
-// choiceChanged follows a new choice: picking a service fills in an empty
-// Upstream from its health URL in ServiceMan.
-func (f *form) choiceChanged(m *Model, fl *field) {
-	if fl.id != "service" || f.val("upstream") != "" {
-		return
+// choiceChanged follows a new choice: picking a service fills in Upstream
+// from its health URL in ServiceMan (when Upstream is empty or was filled in
+// for another service), then asks the service's binary for service-info.
+func (f *form) choiceChanged(m *Model, fl *field) tea.Cmd {
+	if fl.id != "service" {
+		return nil
 	}
 	for _, u := range m.tracked {
-		if u.Key() == fl.value() {
-			if up := services.Upstream(u.URL); up != "" {
-				f.get("upstream").ti.SetValue(up)
-			}
+		if u.Key() != fl.value() {
+			continue
 		}
+		// An edited site's Upstream is only filled in when it's empty.
+		free := f.val("upstream") == "" || (f.orig == "" && f.replaceable("upstream"))
+		if up := services.Upstream(u.URL); up != "" && free {
+			f.fill("upstream", up)
+		}
+		return queryServiceInfo(f, u)
 	}
+	return nil
 }
 
 // prefixKey handles C-c chords.

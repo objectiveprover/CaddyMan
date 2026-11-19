@@ -353,6 +353,9 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		}
 		return nil
 
+	case serviceInfoMsg:
+		m.applyServiceInfo(msg)
+		return nil
 	case savedMsg:
 		m.busy = ""
 		if msg.err != nil {
