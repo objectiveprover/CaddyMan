@@ -416,7 +416,7 @@ func (f *form) autoHelp(m *Model) string {
 	case i.Port == nil || *i.Port <= 0:
 		return "Follows " + name + "'s port, but it has none yet: start it once"
 	}
-	return fmt.Sprintf("Follows %s's port, now %d (pick another service to set it by hand)", name, *i.Port)
+	return fmt.Sprintf("Follows %s's port, now %d", name, *i.Port)
 }
 
 // fieldLines renders the shown fields for a column w wide: per field a label

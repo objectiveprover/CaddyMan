@@ -159,7 +159,8 @@ func (m *Model) refreshCmd() tea.Cmd {
 		if err == nil {
 			msg.cfg = c
 		}
-		msg.tracked, _ = services.Tracked(smPath)
+		tracked, _ := services.Tracked(smPath)
+		msg.tracked = withoutCaddy(tracked)
 		if c != nil {
 			var units []services.Unit
 			for _, s := range c.Sites {
@@ -172,6 +173,18 @@ func (m *Model) refreshCmd() tea.Cmd {
 		}
 		return msg
 	}
+}
+
+// withoutCaddy drops Caddy's own unit from ServiceMan's tracked services:
+// a site can't proxy to the server that serves it.
+func withoutCaddy(units []services.Unit) []services.Unit {
+	var out []services.Unit
+	for _, u := range units {
+		if u.Name != caddy.UnitName {
+			out = append(out, u)
+		}
+	}
+	return out
 }
 
 // ------------------------------------------------------------------ helpers

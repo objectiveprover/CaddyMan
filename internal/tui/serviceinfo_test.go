@@ -8,6 +8,7 @@ import (
 
 	"caddyman/internal/config"
 	"caddyman/internal/serviceinfo"
+	"caddyman/internal/services"
 )
 
 func info(name string, port int, https, trusted bool, redirect string) *serviceinfo.Info {
@@ -179,5 +180,13 @@ func TestServiceInfosMakeUpstreamAuto(t *testing.T) {
 	m.update(serviceInfosMsg{"user/jellyfin.service": info("jellyfin", 8096, true, true, "")})
 	if !f.upAuto || f.val("upstream") != "auto" {
 		t.Errorf("auto %v, upstream %q", f.upAuto, f.val("upstream"))
+	}
+}
+
+// Caddy's own unit is never offered as a site's service.
+func TestWithoutCaddy(t *testing.T) {
+	got := withoutCaddy([]services.Unit{{Name: "caddy.service", Scope: "system"}, {Name: "jellyfin.service", Scope: "user"}})
+	if len(got) != 1 || got[0].Name != "jellyfin.service" {
+		t.Errorf("got %v", got)
 	}
 }
