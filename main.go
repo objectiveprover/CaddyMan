@@ -223,7 +223,7 @@ func paths() error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("config:       %s\nsite files:   %s\nCaddy's copy: %s\ncaddyfile:    %s\nroot cert:    %s\nserviceman:   %s\n",
+	fmt.Printf("config:       %s\nsite files:   %s\nCaddy's copy: %s\ncaddyfile:    %s\nroot cert:    %s\nServiceMan:   %s\n",
 		config.Path(), config.SitesDir(), c.CaddySitesDirPath(), c.CaddyfilePath(), c.RootCertPath(), c.ServicemanConfigPath())
 	return nil
 }

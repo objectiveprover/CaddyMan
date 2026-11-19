@@ -2,7 +2,7 @@
 
 A terminal UI for the sites Caddy serves for your self-hosted apps. Each site gives an app
 on this machine a LAN name like `jellyfin.home.arpa` and is linked to the systemd service
-that runs the app. It's the companion of [serviceman](https://github.com/objectiveprover/ServiceMan): serviceman runs
+that runs the app. It's the companion of [ServiceMan](https://github.com/objectiveprover/ServiceMan): ServiceMan runs
 your apps, and CaddyMan puts them behind Caddy. Navigation uses Emacs keys.
 
 CaddyMan doesn't install or run Caddy. You run Caddy the normal way, as a system service,
