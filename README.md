@@ -61,21 +61,27 @@ and CaddyMan only manages the site entries. Everything CaddyMan owns stays in
 - Each site is either a reverse proxy to a port (`8096` means `localhost:8096`) or a
   static file server for a directory (Caddy's user must be able to read it). Its options:
   - **Service:** the systemd unit running the app, picked from the services ServiceMan
-    tracks. Picking one fills in an empty Upstream from its health URL. An app with a
+    tracks. It comes first in the form, since picking one fills in the rest. Picking one
+    fills in an empty Upstream from its health URL. An app with a
     `caddyman-info` command (it prints JSON describing itself; `serviceman-info` is the
     same command, for ServiceMan) is *autoconfigurable*, and the Service field says so,
-    with its port. Picking it fills in a new site's name, port and suggested HTTPS,
-    Trusted only and Redirect values; fields you changed are kept. An existing site
-    keeps its settings, but its Upstream follows the app's port when the form opens:
-    an empty one is filled in, and a local one (`8096`, `localhost:8096`) pointing at an
-    old port is changed (you see it before saving). An app that hasn't picked its port
-    yet (it does on its first start) is shown as such. Only binaries that contain the
+    with its port. Picking it makes Upstream **auto**, and fills in a new site's name and
+    suggested HTTPS, Trusted only and Redirect values; fields you changed are kept. An
+    existing site keeps its other settings. Only binaries that contain the
     name `caddyman-info` are asked, so other programs are never run with an argument
     they don't know; each is asked again only when it or its config file changes.
+  - **Name:** a short name or a full address (see below).
+  - **Serves:** a proxy or static files.
+  - **Upstream** (proxy) or **Directory** (static files). An auto Upstream can't be
+    edited: the config stores `"upstream": "auto"`, and CaddyMan asks the service for its
+    port every time it writes the site's file (saving, `caddyman apply`), so the site
+    follows the app's port. If the app has no port yet (it picks one on its first start),
+    saving or applying stops and says so. Pick another service, or none, to type an
+    Upstream by hand.
+  - **Redirect / to:** sends requests for exactly `/` elsewhere, e.g. `/web/`.
   - **HTTPS:** a certificate from Caddy's own certificate authority (`tls internal`). Turn
     it off for plain HTTP.
   - **Trusted only:** imports your `trusted_only` snippet (named in the config).
-  - **Redirect / to:** sends requests for exactly `/` elsewhere, e.g. `/web/`.
   - **Enabled:** a disabled site stays in the list but has no file, so Caddy doesn't serve it.
 - Short names get the `domain_suffix` (`home.arpa`): `jellyfin` is served at
   `jellyfin.home.arpa`. A name with a dot is used as it is.

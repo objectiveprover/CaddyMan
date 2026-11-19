@@ -369,8 +369,11 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		return nil
 	case serviceInfosMsg:
 		m.info = msg
-		if m.form != nil {
-			m.form.get("service").labelServices(m.tracked, m.info)
+		if f := m.form; f != nil {
+			f.get("service").labelServices(m.tracked, m.info)
+			if m.info[f.val("service")] != nil {
+				f.setAuto(true)
+			}
 		}
 		return nil
 	case savedMsg:

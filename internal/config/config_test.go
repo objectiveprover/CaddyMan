@@ -158,6 +158,12 @@ func TestValidation(t *testing.T) {
 	if err := c.Validate("", Site{Name: "u", Kind: Proxy, Upstream: "1", Service: "x.service"}); err == nil {
 		t.Error("a service without a scope was accepted")
 	}
+	if err := c.Validate("", Site{Name: "v", Kind: Proxy, Upstream: AutoUpstream, Service: "x.service", ServiceScope: "user"}); err != nil {
+		t.Errorf("auto upstream with a service: %v", err)
+	}
+	if err := c.Validate("", Site{Name: "w", Kind: Proxy, Upstream: AutoUpstream}); err == nil || !strings.Contains(err.Error(), "needs a service") {
+		t.Errorf("auto upstream without a service: %v", err)
+	}
 }
 
 func TestNormalizeUpstream(t *testing.T) {

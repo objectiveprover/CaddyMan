@@ -104,7 +104,10 @@ func list() error {
 		}
 		return s
 	}
-	p, _ := caddy.Pending(c)
+	p, err := caddy.Pending(c)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "note: can't tell which sites are applied: %v\n", err)
+	}
 	fmt.Printf("%-32s %-5s %-7s %-24s %-28s %-5s %-7s %s\n", "SITE", "STATE", "APPLIED", "TARGET", "SERVICE", "HTTPS", "TRUSTED", "REDIRECT")
 	for _, s := range c.Sorted() {
 		svc := ""

@@ -28,15 +28,20 @@ func (s Saved) Note() string {
 	return "not checked (" + s.Unchecked + "); apply with C-x C-s"
 }
 
-// Desired is every enabled site's file, by file name, as the config says.
-func Desired(c *config.Config) map[string][]byte {
+// Desired is every enabled site's file, by file name, as the config says,
+// with auto upstreams resolved (see Resolve).
+func Desired(c *config.Config) (map[string][]byte, error) {
+	r, err := Resolve(c)
+	if err != nil {
+		return nil, err
+	}
 	want := map[string][]byte{}
-	for _, s := range c.Sites {
+	for _, s := range r.Sites {
 		if s.Enabled {
-			want[c.FileName(s)] = []byte(caddyfile.File(c, s))
+			want[r.FileName(s)] = []byte(caddyfile.File(r, s))
 		}
 	}
-	return want
+	return want, nil
 }
 
 // ownedFiles reads the site files CaddyMan wrote: *.caddy files in dir
@@ -131,7 +136,11 @@ func SaveLocal(c *config.Config, save func() error) (Saved, error) {
 				c.CaddyFile(s))
 		}
 	}
-	restore, err := sync(dir, Desired(c))
+	want, err := Desired(c)
+	if err != nil {
+		return Saved{}, err
+	}
+	restore, err := sync(dir, want)
 	if err != nil {
 		return Saved{}, err
 	}

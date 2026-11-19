@@ -36,9 +36,13 @@ func Pending(c *config.Config) (PendingSet, error) {
 	if err != nil {
 		return PendingSet{}, err
 	}
+	want, err := Desired(c)
+	if err != nil {
+		return PendingSet{}, err
+	}
 	var p PendingSet
 	addr := func(name string) string { return strings.TrimSuffix(name, ".caddy") }
-	for name, b := range Desired(c) {
+	for name, b := range want {
 		cur, ok := have[name]
 		switch {
 		case !ok:
@@ -47,7 +51,6 @@ func Pending(c *config.Config) (PendingSet, error) {
 			p.Changed = append(p.Changed, addr(name))
 		}
 	}
-	want := Desired(c)
 	for name := range have {
 		if _, ok := want[name]; !ok {
 			p.Removed = append(p.Removed, addr(name))

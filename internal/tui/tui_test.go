@@ -151,6 +151,19 @@ func TestFormShowsFieldsForServes(t *testing.T) {
 	if len(lines) != m.h {
 		t.Errorf("view is %d lines, want %d", len(lines), m.h)
 	}
+	// Service first, then Name, Serves, Upstream/Directory, Redirect, HTTPS,
+	// Trusted only, Enabled.
+	var ids []string
+	for _, fl := range m.form.fields {
+		ids = append(ids, fl.id)
+	}
+	if got := strings.Join(ids, " "); got != "service name serves upstream root redirect https trusted enabled" {
+		t.Errorf("field order = %s", got)
+	}
+	if m.form.fields[m.form.focus].id != "service" {
+		t.Errorf("the form opens on %q, want service", m.form.fields[m.form.focus].id)
+	}
+	m.handleKey(keyCN) // Name
 	m.handleKey(runes("jellyfin"))
 	if v, _ := view(m); !strings.Contains(v, "Served at https://jellyfin.home.arpa") {
 		t.Errorf("name help doesn't show the address:\n%s", v)
@@ -166,8 +179,8 @@ func TestFormShowsFieldsForServes(t *testing.T) {
 		t.Errorf("after Serves, focus is on %q, want root", m.form.fields[m.form.focus].id)
 	}
 	m.handleKey(keyCN)
-	if m.form.fields[m.form.focus].id != "service" {
-		t.Errorf("after Directory, focus is on %q, want service", m.form.fields[m.form.focus].id)
+	if m.form.fields[m.form.focus].id != "redirect" {
+		t.Errorf("after Directory, focus is on %q, want redirect", m.form.fields[m.form.focus].id)
 	}
 	// Moving down stops on the last field.
 	for range m.form.fields {
@@ -185,6 +198,7 @@ func TestFormShowsFieldsForServes(t *testing.T) {
 func TestFormSaveAndEdit(t *testing.T) {
 	m := testModel(t)
 	m.handleKey(runes("c"))
+	m.handleKey(keyCN) // Name
 	m.handleKey(runes("app"))
 	// C-c C-c with no upstream: refused, form stays.
 	m.handleKey(keyCC)
@@ -192,9 +206,7 @@ func TestFormSaveAndEdit(t *testing.T) {
 	if m.form == nil || !strings.Contains(m.form.err, "Upstream is required") {
 		t.Fatalf("missing upstream accepted (err %q)", m.form.err)
 	}
-	m.handleKey(keyCN) // Serves
-	m.handleKey(keyCN) // Upstream
-	m.handleKey(keyCN) // Service
+	m.handleKey(keyCP) // Service
 	if v, _ := view(m); !strings.Contains(v, "None ✓") || !strings.Contains(v, "1 of 3") {
 		t.Errorf("service field:\n%s", v)
 	}
@@ -229,7 +241,8 @@ func TestFormSaveAndEdit(t *testing.T) {
 	if m.form == nil || m.form.orig != "app.home.arpa" || m.form.val("upstream") != "localhost:8096" || m.form.val("service") != "user/jellyfin.service" {
 		t.Fatalf("edit form = %+v", m.form)
 	}
-	m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlU})
+	m.handleKey(keyCN) // Name (the cursor at its start)
+	m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlK})
 	m.handleKey(runes("web"))
 	m.handleKey(keyCC)
 	run(m, m.handleKey(keyCC))

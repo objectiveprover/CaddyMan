@@ -49,7 +49,7 @@ func Site(c *config.Config, s config.Site) string {
 		line("file_server")
 	default:
 		up := config.NormalizeUpstream(s.Upstream)
-		if up == "" {
+		if up == "" || s.IsAuto() { // auto: resolved before files are written
 			up = "localhost:PORT"
 		}
 		line("reverse_proxy %s", Quote(up))

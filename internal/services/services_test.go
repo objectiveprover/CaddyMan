@@ -38,6 +38,7 @@ func TestUpstream(t *testing.T) {
 		"https://nas:5001/x":           "https://nas:5001",
 		"":                             "",
 		"localhost:80":                 "",
+		"auto":                         "", // ServiceMan's "ask serviceman-info"; caddyman-info gives the port
 	} {
 		if got := Upstream(in); got != want {
 			t.Errorf("Upstream(%q) = %q, want %q", in, got, want)

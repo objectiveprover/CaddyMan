@@ -259,7 +259,7 @@ func (m *Model) detailView(w, h int) string {
 		out = append(out, trunc(gutter+sDim.Render("Service: ")+s.Service+sDim.Render(" ("+s.ServiceScope+")  ")+m.unitState(*s)+
 			sDim.Render("  (s for its status)"), w))
 	}
-	block := strings.Split(strings.TrimRight(caddyfile.Site(m.cfg, *s), "\n"), "\n")
+	block := strings.Split(strings.TrimRight(caddyfile.Site(m.cfg, m.previewSite(*s)), "\n"), "\n")
 	room := h - len(out)
 	if len(block) > room {
 		block = append(block[:room-1], sDim.Render("…  (v shows the whole file)"))

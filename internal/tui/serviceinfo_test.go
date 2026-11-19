@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"caddyman/internal/config"
 	"caddyman/internal/serviceinfo"
 )
@@ -21,23 +23,51 @@ func TestNewSiteFilledFromServiceInfo(t *testing.T) {
 	m.openForm(nil)
 	f := m.form
 	f.get("service").setChoice("user/jellyfin.service")
-	f.choiceChanged(m, f.get("service")) // Upstream from ServiceMan's health URL first
-	if got := f.val("upstream"); got != "localhost:8096" {
-		t.Fatalf("upstream from the health URL = %q", got)
+	f.choiceChanged(m, f.get("service")) // not known as autoconfigurable yet: Upstream from ServiceMan's health URL
+	if got := f.val("upstream"); got != "localhost:8096" || f.upAuto {
+		t.Fatalf("upstream from the health URL = %q (auto %v)", got, f.upAuto)
 	}
 	f.get("redirect").ti.SetValue("/mine/") // typed while the binary answers
 	m.update(serviceInfoMsg{f, "user/jellyfin.service", info("bookshelf", 20001, false, false, "/web/")})
-	for id, want := range map[string]string{"name": "bookshelf", "upstream": "20001", "https": "no", "trusted": "no", "redirect": "/mine/"} {
+	for id, want := range map[string]string{"name": "bookshelf", "upstream": "auto", "https": "no", "trusted": "no", "redirect": "/mine/"} {
 		if got := f.val(id); got != want {
 			t.Errorf("%s = %q, want %q", id, got, want)
 		}
 	}
+	if s := f.site(); !s.IsAuto() || s.Service != "jellyfin.service" {
+		t.Errorf("site = %+v", s)
+	}
+	if v, _ := view(m); !strings.Contains(v, "Follows jellyfin.service's port, now 20001") {
+		t.Errorf("auto Upstream not described:\n%s", v)
+	}
+	m.showPreview = true
+	if v, _ := view(m); !strings.Contains(v, "reverse_proxy localhost:20001") {
+		t.Errorf("preview doesn't show the service's port:\n%s", v)
+	}
+
+	// Auto Upstream is skipped when moving and can't be typed in.
+	f.setFocus(2) // Serves
+	f.move(1)
+	if id := f.fields[f.focus].id; id != "redirect" {
+		t.Errorf("after Serves, focus is on %q, want redirect", id)
+	}
+	f.setFocus(3)
+	m.handleKey(runes("9"))
+	m.handleKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	if f.val("upstream") != "auto" {
+		t.Errorf("auto upstream was typed over: %q", f.val("upstream"))
+	}
 
 	// Another service: what was filled in follows it; what was typed stays.
+	f.setFocus(0)
 	f.get("name").ti.SetValue("books")
 	f.get("service").setChoice("system/nginx.service")
+	f.choiceChanged(m, f.get("service")) // unknown yet: Upstream can be typed again
+	if f.upAuto || f.val("upstream") != "" {
+		t.Errorf("unknown service: auto %v, upstream %q", f.upAuto, f.val("upstream"))
+	}
 	m.update(serviceInfoMsg{f, "system/nginx.service", info("nginx", 20002, true, true, "")})
-	for id, want := range map[string]string{"name": "books", "upstream": "20002", "https": "yes", "trusted": "yes", "redirect": "/mine/"} {
+	for id, want := range map[string]string{"name": "books", "upstream": "auto", "https": "yes", "trusted": "yes", "redirect": "/mine/"} {
 		if got := f.val(id); got != want {
 			t.Errorf("after switching, %s = %q, want %q", id, got, want)
 		}
@@ -45,15 +75,32 @@ func TestNewSiteFilledFromServiceInfo(t *testing.T) {
 
 	// A late answer for a service no longer picked is ignored.
 	m.update(serviceInfoMsg{f, "user/jellyfin.service", info("late", 20009, false, false, "")})
-	if f.val("upstream") != "20002" {
-		t.Errorf("late answer applied: upstream %q", f.val("upstream"))
+	if f.val("https") != "yes" || f.autoFrom != "nginx" {
+		t.Errorf("late answer applied: https %q, from %q", f.val("https"), f.autoFrom)
+	}
+
+	// Back to an autoconfigurable one already known: auto at once. None:
+	// Upstream is typed again.
+	f.get("service").setChoice("user/jellyfin.service")
+	f.choiceChanged(m, f.get("service"))
+	if !f.upAuto || f.val("upstream") != "auto" {
+		t.Errorf("known autoconfigurable service: auto %v, upstream %q", f.upAuto, f.val("upstream"))
+	}
+	f.get("service").setChoice(noService)
+	f.choiceChanged(m, f.get("service"))
+	if f.upAuto || f.val("upstream") != "" {
+		t.Errorf("no service: auto %v, upstream %q", f.upAuto, f.val("upstream"))
+	}
+	f.setFocus(2)
+	f.move(1)
+	if id := f.fields[f.focus].id; id != "upstream" {
+		t.Errorf("Upstream isn't focusable again: focus on %q", id)
 	}
 }
 
-// An edited site keeps its settings, but its Upstream follows the service's
-// port: an empty one or a stale local one is set, one typed by hand or on
-// another host is kept.
-func TestEditedSiteUpstreamFollowsPort(t *testing.T) {
+// An edited site keeps its settings, but Upstream becomes auto when its
+// service is autoconfigurable.
+func TestEditedSiteUpstreamBecomesAuto(t *testing.T) {
 	edit := func(upstream string) (*Model, *form) {
 		m := testModel(t, config.Site{Name: "app", Enabled: true, Kind: config.Proxy, Upstream: upstream, HTTPS: true,
 			Service: "jellyfin.service", ServiceScope: "user"})
@@ -68,42 +115,34 @@ func TestEditedSiteUpstreamFollowsPort(t *testing.T) {
 
 	m, f := edit("localhost:9000")
 	answer(m, f, 20001)
-	if f.val("upstream") != "localhost:20001" || f.val("name") != "app" || f.val("https") != "yes" || f.val("redirect") != "" {
-		t.Errorf("stale upstream: upstream %q name %q https %q redirect %q", f.val("upstream"), f.val("name"), f.val("https"), f.val("redirect"))
+	if f.val("upstream") != "auto" || f.val("name") != "app" || f.val("https") != "yes" || f.val("redirect") != "" {
+		t.Errorf("upstream %q name %q https %q redirect %q", f.val("upstream"), f.val("name"), f.val("https"), f.val("redirect"))
 	}
-	if v, _ := view(m); !strings.Contains(v, "autoconfigured from bookshelf") || !strings.Contains(m.msg, "localhost:9000 → localhost:20001") {
+	if v, _ := view(m); !strings.Contains(v, "autoconfigured from bookshelf") || !strings.Contains(m.msg, "localhost:9000 → auto") {
 		t.Errorf("no word of the change: msg %q\n%s", m.msg, v)
 	}
 
-	for _, up := range []string{"9000", "localhost:20001"} {
-		m, f = edit(up)
-		answer(m, f, 20001)
-		if want := map[string]string{"9000": "20001", "localhost:20001": "localhost:20001"}[up]; f.val("upstream") != want {
-			t.Errorf("%s: upstream %q, want %q", up, f.val("upstream"), want)
-		}
+	// Already auto: locked from the start, nothing to say.
+	m, f = edit("auto")
+	if !f.upAuto || f.val("upstream") != "auto" {
+		t.Errorf("auto site opened with auto %v, upstream %q", f.upAuto, f.val("upstream"))
 	}
-
-	m, f = edit("localhost:9000")
-	f.get("upstream").ti.SetValue("localhost:7000") // typed
-	answer(m, f, 20001)
-	if f.val("upstream") != "localhost:7000" {
-		t.Errorf("typed upstream replaced: %q", f.val("upstream"))
+	if v, _ := view(m); !strings.Contains(v, "Follows jellyfin.service's port (asking it…)") {
+		t.Errorf("auto Upstream before the answer:\n%s", v)
 	}
-
-	m, f = edit("nas:9000")
+	m.msg = ""
 	answer(m, f, 20001)
-	if f.val("upstream") != "nas:9000" {
-		t.Errorf("remote upstream replaced: %q", f.val("upstream"))
+	if m.msg != "" {
+		t.Errorf("msg = %q", m.msg)
 	}
 
 	m, f = edit("")
 	answer(m, f, 0)
-	if f.val("upstream") != "" || !strings.Contains(m.msg, "no port yet") {
+	if f.val("upstream") != "auto" || !strings.Contains(m.msg, "no port yet") {
 		t.Errorf("no port: upstream %q, msg %q", f.val("upstream"), m.msg)
 	}
-	answer(m, f, 20001)
-	if f.val("upstream") != "20001" {
-		t.Errorf("empty upstream not filled: %q", f.val("upstream"))
+	if v, _ := view(m); !strings.Contains(v, "it has none yet: start it once") {
+		t.Errorf("no port not shown:\n%s", v)
 	}
 }
 
@@ -125,18 +164,20 @@ func TestServiceFieldMarksAutoconfigurable(t *testing.T) {
 	f := m.form
 	f.get("service").setChoice("system/nginx.service")
 	m.update(serviceInfoMsg{f, "system/nginx.service", info("nginx", 0, false, true, "/x/")})
-	if f.val("name") != "nginx" || f.val("upstream") != "" || f.val("redirect") != "/x/" || !strings.Contains(m.msg, "no port yet") {
+	if f.val("name") != "nginx" || f.val("upstream") != "auto" || f.val("redirect") != "/x/" || !strings.Contains(m.msg, "no port yet") {
 		t.Errorf("name %q upstream %q redirect %q msg %q", f.val("name"), f.val("upstream"), f.val("redirect"), m.msg)
 	}
 }
 
-func TestLocalPort(t *testing.T) {
-	for up, want := range map[string]int{"8096": 8096, "localhost:8096": 8096, "127.0.0.1:1": 1, "[::1]:9": 9, ":80": 80, "nas:8096": 0, "localhost": 0, "": 0} {
-		if p, ok := localPort(up); p != want && ok || ok != (want > 0) {
-			t.Errorf("localPort(%q) = %d, %v", up, p, ok)
-		}
-	}
-	if got := withPort("[::1]:9", 20001); got != "[::1]:20001" {
-		t.Errorf("withPort = %q", got)
+// Infos arriving after a service was picked make its Upstream auto.
+func TestServiceInfosMakeUpstreamAuto(t *testing.T) {
+	m := testModel(t)
+	m.openForm(nil)
+	f := m.form
+	f.get("service").setChoice("user/jellyfin.service")
+	f.choiceChanged(m, f.get("service"))
+	m.update(serviceInfosMsg{"user/jellyfin.service": info("jellyfin", 8096, true, true, "")})
+	if !f.upAuto || f.val("upstream") != "auto" {
+		t.Errorf("auto %v, upstream %q", f.upAuto, f.val("upstream"))
 	}
 }

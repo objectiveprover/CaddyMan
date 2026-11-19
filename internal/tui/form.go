@@ -67,6 +67,11 @@ type form struct {
 	// autoFrom names the service whose caddyman-info filled in the form
 	// ("" until one did), shown in the top bar.
 	autoFrom string
+
+	// upAuto is on while Upstream is auto: the picked service is
+	// autoconfigurable, so the site follows its port. Upstream then can't be
+	// focused or typed in.
+	upAuto bool
 }
 
 // noService is the Service field's first choice.
@@ -128,7 +133,9 @@ func (f *field) labelServices(tracked []services.Unit, info map[string]*servicei
 	}
 }
 
-func newFields(c *config.Config) []*field {
+// newFields is the form's fields, in order, with svc (see serviceField)
+// first: picking a service fills in the rest.
+func newFields(c *config.Config, svc *field) []*field {
 	text := func(id, label, help string) *field {
 		return &field{id: id, label: label, help: help, ti: newTextInput()}
 	}
@@ -136,24 +143,21 @@ func newFields(c *config.Config) []*field {
 		return &field{id: id, label: label, help: help, choices: choices}
 	}
 	return []*field{
+		svc,
 		text("name", "Name", ""), // help: the address, see fieldLines
 		choice("serves", "Serves", "", servesProxy, servesStatic),
-		text("upstream", "Upstream", "A port on this machine, or host:port"),
+		text("upstream", "Upstream", "A port on this machine, or host:port"), // auto: see fieldLines
 		text("root", "Directory", "The directory to serve (Caddy's user must be able to read it)"),
+		text("redirect", "Redirect / to", "Optional: send requests for / there, e.g. /web/"),
 		choice("https", "HTTPS", "Certificate from Caddy's own CA (devices must trust its root certificate)", "yes", "no"),
 		choice("trusted", "Trusted only", "Imports ("+c.TrustedSnippet+") from your Caddyfile: only trusted clients get in", "yes", "no"),
-		text("redirect", "Redirect / to", "Optional: send requests for / there, e.g. /web/"),
 		choice("enabled", "Enabled", "A disabled site stays in the list but not in Caddy's config", "yes", "no"),
 	}
 }
 
 // openForm opens Add Site (s nil) or Edit Site for s.
 func (m *Model) openForm(s *config.Site) tea.Cmd {
-	f := &form{fields: newFields(m.cfg), title: "Add Site"}
-	// Service goes after Upstream and Directory.
-	svc := serviceField(m.tracked, s, m.info)
-	at := 4
-	f.fields = append(f.fields[:at], append([]*field{svc}, f.fields[at:]...)...)
+	f := &form{fields: newFields(m.cfg, serviceField(m.tracked, s, m.info)), title: "Add Site"}
 	if s != nil {
 		f.title, f.orig = "Edit Site", m.cfg.Address(*s)
 		f.get("name").ti.SetValue(s.Name)
@@ -166,6 +170,7 @@ func (m *Model) openForm(s *config.Site) tea.Cmd {
 		f.get("trusted").setBool(s.TrustedOnly)
 		f.get("redirect").ti.SetValue(s.RedirectRoot)
 		f.get("enabled").setBool(s.Enabled)
+		f.upAuto = s.IsAuto()
 	}
 	m.form, m.mode = f, modeForm
 	f.setFocus(0)
@@ -236,6 +241,32 @@ func (f *form) site() config.Site {
 	return s
 }
 
+// setAuto turns auto Upstream on (the picked service is autoconfigurable)
+// or off. Off clears an Upstream that still says auto, so it can be filled
+// in or typed.
+func (f *form) setAuto(on bool) {
+	if on == f.upAuto {
+		return
+	}
+	f.upAuto = on
+	up := f.get("upstream")
+	switch {
+	case on:
+		up.ti.SetValue(config.AutoUpstream)
+		if f.locked(f.focus) {
+			f.move(1)
+		}
+	case up.value() == config.AutoUpstream:
+		up.ti.SetValue("")
+	}
+}
+
+// locked reports whether field i is shown but can't be changed: Upstream
+// while it's auto.
+func (f *form) locked(i int) bool {
+	return f.upAuto && f.fields[i].id == "upstream"
+}
+
 // hidden reports whether field i doesn't apply: Upstream for static files,
 // Directory for a proxy.
 func (f *form) hidden(i int) bool {
@@ -252,7 +283,7 @@ func (f *form) hidden(i int) bool {
 // and last fields (no wrapping around).
 func (f *form) move(d int) {
 	for i := f.focus + d; i >= 0 && i < len(f.fields); i += d {
-		if !f.hidden(i) {
+		if !f.hidden(i) && !f.locked(i) {
 			f.setFocus(i)
 			return
 		}
@@ -295,6 +326,9 @@ func (f *form) key(m *Model, msg tea.KeyMsg) tea.Cmd {
 		}
 		return nil
 	}
+	if f.locked(f.focus) {
+		return nil
+	}
 	if cur.choices != nil {
 		switch msg.String() {
 		case " ", "ctrl+f", "right":
@@ -311,20 +345,22 @@ func (f *form) key(m *Model, msg tea.KeyMsg) tea.Cmd {
 	return cmd
 }
 
-// choiceChanged follows a new choice: picking a service fills in Upstream
-// from its health URL in ServiceMan (when Upstream is empty or was filled in
-// for another service), then asks the service's binary for caddyman-info.
+// choiceChanged follows a new choice. Picking an autoconfigurable service
+// makes Upstream auto; picking another one fills in Upstream from its health
+// URL in ServiceMan (when Upstream is empty or was filled in for another
+// service). Then the service's binary is asked for caddyman-info.
 func (f *form) choiceChanged(m *Model, fl *field) tea.Cmd {
 	if fl.id != "service" {
 		return nil
 	}
+	f.setAuto(m.info[fl.value()] != nil)
 	for _, u := range m.tracked {
 		if u.Key() != fl.value() {
 			continue
 		}
 		// An edited site's Upstream is only filled in when it's empty.
 		free := f.val("upstream") == "" || (f.orig == "" && f.replaceable("upstream"))
-		if up := services.Upstream(u.URL); up != "" && free {
+		if up := services.Upstream(u.URL); up != "" && free && !f.upAuto {
 			f.fill("upstream", up)
 		}
 		return queryServiceInfo(f, u, m.infoCache)
@@ -369,6 +405,20 @@ func (f *form) submit(m *Model) tea.Cmd {
 	})
 }
 
+// autoHelp describes an auto Upstream: the service whose port it follows.
+func (f *form) autoHelp(m *Model) string {
+	key := f.val("service")
+	_, name, _ := strings.Cut(key, "/")
+	i := m.info[key]
+	switch {
+	case i == nil:
+		return "Follows " + name + "'s port (asking it…)"
+	case i.Port == nil || *i.Port <= 0:
+		return "Follows " + name + "'s port, but it has none yet: start it once"
+	}
+	return fmt.Sprintf("Follows %s's port, now %d (pick another service to set it by hand)", name, *i.Port)
+}
+
 // fieldLines renders the shown fields for a column w wide: per field a label
 // line (name and gray description), the input below it (after a ❯ for text
 // fields, a └ for choices) and a ─ line under it, except under the last
@@ -404,6 +454,9 @@ func (f *form) fieldLines(m *Model, w int) (lines []string, start, end int) {
 				help = "Served at " + s.URL(m.cfg.DomainSuffix)
 			}
 		}
+		if f.locked(i) {
+			help = f.autoHelp(m)
+		}
 
 		if fl.choices == nil {
 			if tw := inputTextWidth(w); fl.ti.Width != tw {
@@ -414,7 +467,11 @@ func (f *form) fieldLines(m *Model, w int) (lines []string, start, end int) {
 				fl.ti.CursorEnd()
 				fl.ti.SetCursor(pos)
 			}
-			tf := textField(cursorMark(focused), label, help, fl.ti.View(), focused, w)
+			input := fl.ti.View()
+			if f.locked(i) {
+				input = sDim.Render(fl.value())
+			}
+			tf := textField(cursorMark(focused), label, help, input, focused, w)
 			if !bottom {
 				tf = tf[:2]
 			}
@@ -544,7 +601,7 @@ func (f *form) view(m *Model, w, h int) string {
 
 // previewLines is the site's file as it would be written, under a header.
 func (f *form) previewLines(m *Model) []string {
-	s := f.site()
+	s := m.previewSite(f.site())
 	head := "Preview: " + config.Tilde(m.cfg.LocalFile(s))
 	if !s.Enabled {
 		head = "Preview (disabled: no file, left out of Caddy's config)"

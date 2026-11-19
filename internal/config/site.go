@@ -41,6 +41,16 @@ type Site struct {
 	ServiceScope string `json:"service_scope,omitempty"`
 }
 
+// AutoUpstream is the Upstream of a site that follows its service's port:
+// the service answers caddyman-info, and its port is looked up whenever the
+// site's file is written.
+const AutoUpstream = "auto"
+
+// IsAuto reports whether s is a proxy whose Upstream is AutoUpstream.
+func (s Site) IsAuto() bool {
+	return s.Kind == Proxy && strings.TrimSpace(s.Upstream) == AutoUpstream
+}
+
 // ServiceKey identifies the site's unit, "<scope>/<unit>" like ServiceMan's
 // keys ("" when the site has none).
 func (s Site) ServiceKey() string {
@@ -179,7 +189,11 @@ func (c *Config) Validate(orig string, s Site) error {
 	}
 	switch s.Kind {
 	case Proxy:
-		if err := ValidUpstream(s.Upstream); err != nil {
+		if s.IsAuto() {
+			if s.Service == "" {
+				return fmt.Errorf("Upstream auto needs a service (an autoconfigurable one) to take the port from")
+			}
+		} else if err := ValidUpstream(s.Upstream); err != nil {
 			return err
 		}
 	case Static:
