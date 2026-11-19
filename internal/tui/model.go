@@ -11,6 +11,7 @@ import (
 
 	"caddyman/internal/caddy"
 	"caddyman/internal/config"
+	"caddyman/internal/serviceinfo"
 	"caddyman/internal/services"
 )
 
@@ -39,6 +40,13 @@ type Model struct {
 	// tracked are ServiceMan's services, offered by the site form.
 	units   map[string]services.State
 	tracked []services.Unit
+	// info is what the tracked services' binaries said with caddyman-info,
+	// by key (serviceInfosCmd); infoFor is the tracked list it was asked for.
+	// infoCache keeps binaries from being run again until they or their
+	// config change (nil: no caching).
+	info      map[string]*serviceinfo.Info
+	infoFor   string
+	infoCache *serviceinfo.Cache
 	// refreshSeq numbers status refreshes; statusSeq is the newest one shown.
 	refreshSeq, statusSeq int
 
@@ -68,7 +76,7 @@ func Run() error {
 	if err != nil {
 		return err
 	}
-	m := &Model{cfg: cfg}
+	m := &Model{cfg: cfg, infoCache: &serviceinfo.Cache{}}
 	if len(cfg.Sites) == 0 {
 		m.setMsg("No sites yet — press c to add one, ? for help")
 	}
@@ -351,10 +359,19 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 			m.cfg = msg.cfg
 			m.selectAddr(addr)
 		}
+		if trackedKeys(m.tracked) != m.infoFor {
+			return m.serviceInfosCmd()
+		}
 		return nil
 
 	case serviceInfoMsg:
 		m.applyServiceInfo(msg)
+		return nil
+	case serviceInfosMsg:
+		m.info = msg
+		if m.form != nil {
+			m.form.get("service").labelServices(m.tracked, m.info)
+		}
 		return nil
 	case savedMsg:
 		m.busy = ""

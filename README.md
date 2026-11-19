@@ -61,10 +61,17 @@ and CaddyMan only manages the site entries. Everything CaddyMan owns stays in
 - Each site is either a reverse proxy to a port (`8096` means `localhost:8096`) or a
   static file server for a directory (Caddy's user must be able to read it). Its options:
   - **Service:** the systemd unit running the app, picked from the services ServiceMan
-    tracks. Picking one fills in an empty Upstream from its health URL. If the app has a
-    `service-info` command (it prints JSON describing itself), a new site also gets its
-    name, port and suggested HTTPS, Trusted only and Redirect values from it; fields you
-    changed are kept, and an existing site only gets an empty Upstream filled in.
+    tracks. Picking one fills in an empty Upstream from its health URL. An app with a
+    `caddyman-info` command (it prints JSON describing itself; `serviceman-info` is the
+    same command, for ServiceMan) is *autoconfigurable*, and the Service field says so,
+    with its port. Picking it fills in a new site's name, port and suggested HTTPS,
+    Trusted only and Redirect values; fields you changed are kept. An existing site
+    keeps its settings, but its Upstream follows the app's port when the form opens:
+    an empty one is filled in, and a local one (`8096`, `localhost:8096`) pointing at an
+    old port is changed (you see it before saving). An app that hasn't picked its port
+    yet (it does on its first start) is shown as such. Only binaries that contain the
+    name `caddyman-info` are asked, so other programs are never run with an argument
+    they don't know; each is asked again only when it or its config file changes.
   - **HTTPS:** a certificate from Caddy's own certificate authority (`tls internal`). Turn
     it off for plain HTTP.
   - **Trusted only:** imports your `trusted_only` snippet (named in the config).

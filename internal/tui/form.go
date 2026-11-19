@@ -10,6 +10,7 @@ import (
 
 	"caddyman/internal/caddyfile"
 	"caddyman/internal/config"
+	"caddyman/internal/serviceinfo"
 	"caddyman/internal/services"
 )
 
@@ -62,34 +63,69 @@ type form struct {
 	// last filled in for a picked service: a field still holding either
 	// may be filled in again, one changed by hand is kept.
 	initial, auto map[string]string
+
+	// autoFrom names the service whose caddyman-info filled in the form
+	// ("" until one did), shown in the top bar.
+	autoFrom string
 }
 
 // noService is the Service field's first choice.
 const noService = ""
 
 // serviceField offers ServiceMan's tracked services, plus the site's own
-// service when ServiceMan doesn't track it.
-func serviceField(tracked []services.Unit, s *config.Site) *field {
-	f := &field{id: "service", label: "Service",
-		help:    "The systemd service running the app (from ServiceMan's tracked services)",
-		choices: []string{noService}, labels: []string{"None"}}
+// service when ServiceMan doesn't track it. info marks the autoconfigurable
+// ones (by key).
+func serviceField(tracked []services.Unit, s *config.Site, info map[string]*serviceinfo.Info) *field {
+	f := &field{id: "service", label: "Service", choices: []string{noService}}
 	for _, u := range tracked {
 		f.choices = append(f.choices, u.Key())
-		f.labels = append(f.labels, u.Label())
 	}
 	if s != nil && s.Service != "" {
 		u := services.Unit{Name: s.Service, Scope: s.ServiceScope}
 		f.setChoice(u.Key())
 		if f.value() != u.Key() {
 			f.choices = append(f.choices, u.Key())
-			f.labels = append(f.labels, u.Label()+" — not tracked by ServiceMan")
 			f.choice = len(f.choices) - 1
 		}
 	}
-	if len(tracked) == 0 {
-		f.help = "No services tracked in ServiceMan yet (track them there to pick one here)"
-	}
+	f.labelServices(tracked, info)
 	return f
+}
+
+// labelServices (re)writes the Service field's labels and help: each unit,
+// whether ServiceMan tracks it, and whether it's autoconfigurable (it
+// answers caddyman-info) and has its port yet.
+func (f *field) labelServices(tracked []services.Unit, info map[string]*serviceinfo.Info) {
+	isTracked := map[string]bool{}
+	for _, u := range tracked {
+		isTracked[u.Key()] = true
+	}
+	f.labels = []string{"None"}
+	auto := false
+	for _, key := range f.choices[1:] {
+		scope, name, _ := strings.Cut(key, "/")
+		l := services.Unit{Name: name, Scope: scope}.Label()
+		if !isTracked[key] {
+			l += " — not tracked by ServiceMan"
+		}
+		if i := info[key]; i != nil {
+			auto = true
+			if i.Port == nil || *i.Port <= 0 {
+				l += " — autoconfigurable, no port yet (start it once)"
+			} else {
+				l += fmt.Sprintf(" — autoconfigurable, port %d", *i.Port)
+			}
+		}
+		f.labels = append(f.labels, l)
+	}
+	switch {
+	case len(tracked) == 0:
+		f.help = "No services tracked in ServiceMan yet (track them there to pick one here)"
+	case auto:
+		f.help = "The systemd service running the app (from ServiceMan's tracked services); autoconfigurable ones fill in the site"
+	default:
+		f.help = "The systemd service running the app (from ServiceMan's tracked services)"
+	}
 }
 
 func newFields(c *config.Config) []*field {
@@ -115,7 +151,7 @@ func newFields(c *config.Config) []*field {
 func (m *Model) openForm(s *config.Site) tea.Cmd {
 	f := &form{fields: newFields(m.cfg), title: "Add Site"}
 	// Service goes after Upstream and Directory.
-	svc := serviceField(m.tracked, s)
+	svc := serviceField(m.tracked, s, m.info)
 	at := 4
 	f.fields = append(f.fields[:at], append([]*field{svc}, f.fields[at:]...)...)
 	if s != nil {
@@ -137,7 +173,11 @@ func (m *Model) openForm(s *config.Site) tea.Cmd {
 	for _, fl := range f.fields {
 		f.initial[fl.id] = fl.value()
 	}
-	return nil
+	cmds := []tea.Cmd{m.serviceInfosCmd()}
+	if s != nil && s.Service != "" { // its port may have changed
+		cmds = append(cmds, queryServiceInfo(f, services.Unit{Name: s.Service, Scope: s.ServiceScope}, m.infoCache))
+	}
+	return tea.Batch(cmds...)
 }
 
 // replaceable reports whether field id may be filled in for a picked
@@ -273,7 +313,7 @@ func (f *form) key(m *Model, msg tea.KeyMsg) tea.Cmd {
 
 // choiceChanged follows a new choice: picking a service fills in Upstream
 // from its health URL in ServiceMan (when Upstream is empty or was filled in
-// for another service), then asks the service's binary for service-info.
+// for another service), then asks the service's binary for caddyman-info.
 func (f *form) choiceChanged(m *Model, fl *field) tea.Cmd {
 	if fl.id != "service" {
 		return nil
@@ -287,7 +327,7 @@ func (f *form) choiceChanged(m *Model, fl *field) tea.Cmd {
 		if up := services.Upstream(u.URL); up != "" && free {
 			f.fill("upstream", up)
 		}
-		return queryServiceInfo(f, u)
+		return queryServiceInfo(f, u, m.infoCache)
 	}
 	return nil
 }
@@ -453,6 +493,9 @@ func (f *form) scroll(lines []string, start, end, h int) []string {
 // ones below them, in up to half the height.
 func (f *form) view(m *Model, w, h int) string {
 	var ctx []string
+	if f.autoFrom != "" {
+		ctx = append(ctx, sGreen.Render("autoconfigured from "+f.autoFrom))
+	}
 	if f.orig != "" {
 		ctx = append(ctx, sDim.Render(f.orig))
 	}
